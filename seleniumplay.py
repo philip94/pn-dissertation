@@ -6,6 +6,7 @@ from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.common.exceptions import NoSuchElementException
 from pyvirtualdisplay import Display
+from webkit_server import InvalidResponseError
 from bs4 import BeautifulSoup
 import dryscrape
 import os
@@ -15,73 +16,69 @@ import subprocess
 
 siteList = []
 
+#Open webpage for domain name scraping
 def createSession(crawlingWebsite):
     dryscrape.start_xvfb()
-    session = dryscrape.Session()
-    session.visit(crawlingWebsite)
-#site = session.at_xpath("//input[@name='host']")
-#site.set(websiteName)
-    response = session.body()
-#for link in session.xpath('//table'):
-#    print link['table']
-#print response
-#response = session.body()
-    session.reset()
-#session.wait_for_safe(lambda: session.at_xpath("//table"))
+    #Begin new session with loaded scripts
+    try:
+    	session = dryscrape.Session()
+    	session.visit(crawlingWebsite)
+    	response = session.body()
+    	#Reset session for handling memory issues
+    	session.reset()
+    except InvalidResponseError as e:
+	print 'InvalidResponseError:', ed
     soup = BeautifulSoup(response, "html.parser")
-#print response
-    #tableFound = soup.findAll("span", {"class": "listItem__properties black default"})
+    #Searches for hyperrefs in a page. This is the hardcoded bit.
+    #Searching for items is webpage-specific. For a different website, please refer to its HTML content
+    #to find out which tags are needed to obtain a list of domains if any.
     tableFound = soup.findAll("a", {"target": "_blank"})
-#print tableFound
-#print tableFound.findAll('tr')
+
     if tableFound == None:
         print "Nothing found. Terminating crawler."
 	quit()
     else:
         for row in tableFound:
-            #if len(row.get('href') != 0:
+            #Add found domains to the list of sites
             siteList.append(row.get('href'))
-
+		
+#Check every domain for HTTPS Support
 def checkHTTPS():
+    #Selenium opens the web browser by default
+    #I have made the display invisible to save time and memory efficiency.
     display = Display(visible = 0, size = (800, 600))
     display.start()
     httpsSiteList = []
     httpSiteList = []
     os.environ['geckodriver'] = "/home/osboxes/Downloads"
-#driver = webdriver.Firefox("/home/osboxes/Downloads/")
 
     for website in siteList:
         print website
+	#Change path depending on the location of your geckodriver
         driver = webdriver.Firefox("/home/osboxes/Downloads/")
         driver.get("http://www.sslshopper.com/ssl-checker.html?hostname=" + website)
-#os.environ['geckodriver'] = "/home/osboxes/Downloads"
+
         delay = 40
         try:
-   # table = driver.find_element_by_class_name('checker_messages')
-    #specTable = table.get_attribute("class")
-   # print specTable
+	    #Wait for 40 seconds before returning any results.
+	    #This makes sure that whole page will be loaded before scraping.
             WebDriverWait(driver, delay).until(EC.presence_of_element_located((By.CLASS_NAME, 'failed')))
             print website + " does NOT support HTTPS!"
+            driver.quit() #Close browser
+            display.stop() #Close
 	    httpSiteList.append(website)
         except TimeoutException:
             print website + " supports HTTPS!"
+	    driver.quit() #Close browser
+            display.stop() #Close
 	    httpsSiteList.append(website)
 	    checkAtlas(website)
         except NoSuchElementException:
             print "Such element does not exist!"
+	    driver.quit() #Close browser
+            display.stop() #Close
 	    httpsSiteList.append(website)
 	    checkAtlas(website)
-        driver.quit()
-        display.stop()
-   # break
-#assert "Python" in driver.title
-#elem = driver.find_element_by_name("q")
-#elem.clear()
-#elem.send_keys("pycon")
-#elem.send_keys(Keys.RETURN)
-#assert "No results found." not in driver.page_source
-#driver.quit()
-#display.stop()
 
     print "Sites supporting HTTPS: " + str(len(httpsSiteList))
     for ssite in httpsSiteList:
@@ -90,18 +87,18 @@ def checkHTTPS():
     print "Sites NOT supporting HTTPS: " + str(len(httpSiteList))
     for nsite in httpSiteList:
         print nsite
-    get_links("http://", httpsSiteList)
 
+#Check if site is present in the atlas and create ruleset
 def checkAtlas(wSite):
     #print httpsList
     shortListedSites = []
     #for wSite in httpsList:
     hyperLinks = []
     try:
-            #request = urllib2.Request(securityString + "www.eff.org/https-everywhere/atlas/letters/e.html")
-            #print "Request sent"
         print wSite.lower()
 	siteChunks = wSite.lower().split(".")
+	for bits in siteChunks:
+	   print bits
 	if "http://www" in siteChunks[0] or "https://www" in siteChunks[0] or "www" in siteChunks[0]:
 	   del siteChunks[0]
 	   print siteChunks[0]
@@ -125,11 +122,12 @@ def checkAtlas(wSite):
                 break
             else:
 	        if atlasSite == hyperLinks[-1]:
-		   print siteChunks[0].lower() + " is NOT in the atlas. \n" 
-                   shortListedSites.append(".".join(str(x) for x in siteChunks))
-		   for shortSite in shortListedSites:
-	               print shortSite
-    		       subprocess.call(["bash make-trivial-rule " + shortSite.split('/')[0]], shell = True, cwd = "/home/osboxes/Documents/https-everywhere/rules")
+		   print siteChunks[0].lower() + " is NOT in the atlas. \n"
+		   ruleSite = ".".join(str(x) for x in siteChunks
+		   print ruleSite
+		   print ruleSite.split('/')[0]
+                   #shortListedSites.append(".".join(str(x) for x in siteChunks))
+    		   #subprocess.call(["bash make-trivial-rule " + ruleSite.split('/')[0]], shell = True, cwd = "/home/osboxes/Documents/https-everywhere/rules")
 		   break
 		continue
 
@@ -141,7 +139,6 @@ def checkAtlas(wSite):
         elif hasattr(e, 'reason'): # URLError
             print "Cannot connect, reason: " + str(e.reason) + "\n"
             pass
-                        #get_links(http_string)
         else:
             pass
     except ValueError, ex:
@@ -149,13 +146,8 @@ def checkAtlas(wSite):
     except:
         print "Unexpected error.\n"
         pass
-    #print "Shortlisted sites: " + str(len(shortListedSites))
-   # for shortSite in shortListedSites:
-#	print shortSite
- #   subprocess.call(["bash make-trivial-rule " + shortSite.split('/')[0]], shell = True, cwd = "/home/osboxes/Documents/https-everywhere/rules")
 
-#createSession("http://www.ranker.com/list/best-gaming-blogs-and-websites/blog-loblaw")
+#Hardcoded - need to specify in the function call which site you would like to crawl
 createSession("http://www.appfreak.net/list-of-100-mobile-game-review-sites/")
 print siteList
 checkHTTPS()
-#get_links("http://", httpsSiteList)
